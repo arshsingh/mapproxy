@@ -75,6 +75,7 @@ def tile_location_tc(tile, cache_dir, file_ext, create_dir=False):
     >>> tile_location_tc(Tile((3, 4, 2)), '/tmp/cache', 'png').replace('\\\\', '/')
     '/tmp/cache/02/000/000/003/000/000/004.png'
     """
+    cache_dir = os.path.join(cache_dir, get_dimensions_prefix(tile))
     if tile.location is None:
         x, y, z = tile.coord
         parts = (cache_dir,
@@ -105,6 +106,7 @@ def tile_location_mp(tile, cache_dir, file_ext, create_dir=False):
     >>> tile_location_mp(Tile((12345678, 98765432, 22)), '/tmp/cache', 'png').replace('\\\\', '/')
     '/tmp/cache/22/1234/5678/9876/5432.png'
     """
+    cache_dir = os.path.join(cache_dir, get_dimensions_prefix(tile))
     if tile.location is None:
         x, y, z = tile.coord
         parts = (cache_dir,
@@ -131,6 +133,7 @@ def tile_location_tms(tile, cache_dir, file_ext, create_dir=False):
     >>> tile_location_tms(Tile((3, 4, 2)), '/tmp/cache', 'png').replace('\\\\', '/')
     '/tmp/cache/2/3/4.png'
     """
+    cache_dir = os.path.join(cache_dir, get_dimensions_prefix(tile))
     if tile.location is None:
         x, y, z = tile.coord
         tile.location = os.path.join(
@@ -154,6 +157,7 @@ def tile_location_reverse_tms(tile, cache_dir, file_ext, create_dir=False):
     >>> tile_location_reverse_tms(Tile((3, 4, 2)), '/tmp/cache', 'png').replace('\\\\', '/')
     '/tmp/cache/4/3/2.png'
     """
+    cache_dir = os.path.join(cache_dir, get_dimensions_prefix(tile))
     if tile.location is None:
         x, y, z = tile.coord
         tile.location = os.path.join(
@@ -179,6 +183,7 @@ def tile_location_quadkey(tile, cache_dir, file_ext, create_dir=False):
     >>> tile_location_quadkey(Tile((3, 4, 2)), '/tmp/cache', 'png').replace('\\\\', '/')
     '/tmp/cache/11.png'
     """
+    cache_dir = os.path.join(cache_dir, get_dimensions_prefix(tile))
     if tile.location is None:
         x, y, z = tile.coord
         quadKey = ""
@@ -214,6 +219,7 @@ def tile_location_arcgiscache(tile, cache_dir, file_ext, create_dir=False):
     >>> tile_location_arcgiscache(Tile((1234567, 87654321, 9)), '/tmp/cache', 'png').replace('\\\\', '/')
     '/tmp/cache/L09/R05397fb1/C0012d687.png'
     """
+    cache_dir = os.path.join(cache_dir, get_dimensions_prefix(tile))
     if tile.location is None:
         x, y, z = tile.coord
         parts = (cache_dir, 'L%02d' % z, 'R%08x' % y, 'C%08x.%s' % (x, file_ext))
@@ -224,3 +230,10 @@ def tile_location_arcgiscache(tile, cache_dir, file_ext, create_dir=False):
 
 def level_location_arcgiscache(z, cache_dir):
     return level_location('L%02d' % z, cache_dir=cache_dir)
+
+def get_dimensions_prefix(tile):
+    if not tile.dimensions:
+        return ''
+
+    values = [d[1] for d in sorted(tile.dimensions.items())]
+    return os.path.join(**values)

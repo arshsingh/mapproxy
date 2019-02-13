@@ -104,10 +104,10 @@ class TileManager(object):
             self.cache.cleanup()
 
     def load_tile_coord(self, tile_coord, dimensions=None, with_metadata=False):
-        tile = Tile(tile_coord)
+        tile = Tile(tile_coord, dimensions=dimensions)
         self.cache.load_tile(tile, with_metadata)
 
-        if tile.coord is not None and not self.is_cached(tile, dimensions=dimensions):
+        if tile.coord is not None and not self.is_cached(tile):
             # missing or staled
             creator = self.creator(dimensions=dimensions)
             created_tiles = creator.create_tiles([tile])
@@ -118,14 +118,14 @@ class TileManager(object):
         return tile
 
     def load_tile_coords(self, tile_coords, dimensions=None, with_metadata=False):
-        tiles = TileCollection(tile_coords)
+        tiles = TileCollection(tile_coords, dimensions=dimensions)
         uncached_tiles = []
 
         # load all in batch
         self.cache.load_tiles(tiles, with_metadata)
 
         for tile in tiles:
-            if tile.coord is not None and not self.is_cached(tile, dimensions=dimensions):
+            if tile.coord is not None and not self.is_cached(tile):
                 # missing or staled
                 uncached_tiles.append(tile)
 
@@ -139,7 +139,7 @@ class TileManager(object):
         return tiles
 
     def remove_tile_coords(self, tile_coords, dimensions=None):
-        tiles = TileCollection(tile_coords)
+        tiles = TileCollection(tile_coords, dimensions=dimensions)
         self.cache.remove_tiles(tiles)
 
     def creator(self, dimensions=None):
@@ -150,7 +150,7 @@ class TileManager(object):
             tile = Tile(self.meta_grid.main_tile(tile.coord))
         return self.locker.lock(tile)
 
-    def is_cached(self, tile, dimensions=None):
+    def is_cached(self, tile):
         """
         Return True if the tile is cached.
         """
@@ -167,7 +167,7 @@ class TileManager(object):
                 cached = False
         return cached
 
-    def is_stale(self, tile, dimensions=None):
+    def is_stale(self, tile):
         """
         Return True if tile exists _and_ is expired.
         """
@@ -333,19 +333,20 @@ class TileCreator(object):
         tile_size = self.grid.tile_size
         query = MapQuery(meta_tile.bbox, meta_tile.size, self.grid.srs, self.tile_mgr.request_format,
             dimensions=self.dimensions)
-        main_tile = Tile(meta_tile.main_tile_coord)
+        main_tile = Tile(meta_tile.main_tile_coord, dimensions=self.dimensions)
         with self.tile_mgr.lock(main_tile):
             if not all(self.is_cached(t) for t in meta_tile.tiles if t is not None):
                 meta_tile_image = self._query_sources(query)
                 if not meta_tile_image: return []
                 splitted_tiles = split_meta_tiles(meta_tile_image, meta_tile.tile_patterns,
-                                                  tile_size, self.tile_mgr.image_opts)
+                                                  tile_size, self.tile_mgr.image_opts,
+                                                  dimensions=self.dimensions)
                 splitted_tiles = [self.tile_mgr.apply_tile_filter(t) for t in splitted_tiles]
                 if meta_tile_image.cacheable:
                     self.cache.store_tiles(splitted_tiles)
                 return splitted_tiles
             # else
-        tiles = [Tile(coord) for coord in meta_tile.tiles]
+        tiles = [Tile(coord, dimensions=self.dimensions) for coord in meta_tile.tiles]
         self.cache.load_tiles(tiles)
         return tiles
 
@@ -355,7 +356,7 @@ class TileCreator(object):
         (using concurrent_tile_creators).
         """
         tile_size = self.grid.tile_size
-        main_tile = Tile(meta_tile.main_tile_coord)
+        main_tile = Tile(meta_tile.main_tile_coord, dimensions=self.dimensions)
         with self.tile_mgr.lock(main_tile):
             if not all(self.is_cached(t) for t in meta_tile.tiles if t is not None):
                 async_pool = async_.Pool(self.tile_mgr.concurrent_tile_creators)
@@ -371,7 +372,7 @@ class TileCreator(object):
                             # call as_buffer to force conversion into cache format
                             tile_image.as_buffer(self.tile_mgr.image_opts)
 
-                        tile = Tile(coord, cacheable=tile_image.cacheable)
+                        tile = Tile(coord, cacheable=tile_image.cacheable, dimensions=self.dimensions)
                         tile.source = tile_image
                         tile = self.tile_mgr.apply_tile_filter(tile)
                     except BlankImage:
@@ -397,7 +398,7 @@ class TileCreator(object):
                 return tiles
 
             # else
-        tiles = [Tile(coord) for coord in meta_tile.tiles]
+        tiles = [Tile(coord, dimension=self.dimensions) for coord in meta_tile.tiles]
         self.cache.load_tiles(tiles)
         return tiles
 
@@ -409,7 +410,7 @@ class Tile(object):
     :ivar source: the data of this tile
     :type source: ImageSource
     """
-    def __init__(self, coord, source=None, cacheable=True):
+    def __init__(self, coord, source=None, cacheable=True, dimensions=None):
         self.coord = coord
         self.source = source
         self.location = None
@@ -417,6 +418,7 @@ class Tile(object):
         self._cacheable = cacheable
         self.size = None
         self.timestamp = None
+        self.dimensions = dimensions
 
     def _cacheable_get(self):
         return CacheInfo(cacheable=self._cacheable, timestamp=self.timestamp,
@@ -505,8 +507,8 @@ class CacheInfo(object):
     __nonzero__ = __bool__
 
 class TileCollection(object):
-    def __init__(self, tile_coords):
-        self.tiles = [Tile(coord) for coord in tile_coords]
+    def __init__(self, tile_coords, dimensions=None):
+        self.tiles = [Tile(coord, dimensions=dimensions) for coord in tile_coords]
         self.tiles_dict = {}
         for tile in self.tiles:
             self.tiles_dict[tile.coord] = tile
@@ -542,7 +544,7 @@ class TileCollection(object):
         return 'TileCollection(%r)' % self.tiles
 
 
-def split_meta_tiles(meta_tile, tiles, tile_size, image_opts):
+def split_meta_tiles(meta_tile, tiles, tile_size, image_opts, dimensions=None):
     try:
         # TODO png8
         # if not self.transparent and format == 'png':
@@ -556,7 +558,7 @@ def split_meta_tiles(meta_tile, tiles, tile_size, image_opts):
         tile_coord, crop_coord = tile
         if tile_coord is None: continue
         data = splitter.get_tile(crop_coord, tile_size)
-        new_tile = Tile(tile_coord, cacheable=meta_tile.cacheable)
+        new_tile = Tile(tile_coord, cacheable=meta_tile.cacheable, dimensions=dimensions)
         new_tile.source = data
         split_tiles.append(new_tile)
     return split_tiles
